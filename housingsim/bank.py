@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .config import CreditPolicyConfig
+from .config import CreditPolicyConfig, TaxPolicyConfig
 from .households import HouseholdArrays, _monthly_mortgage_payment
 from .state import RegionStock
 
@@ -23,6 +23,7 @@ def qualify_buyers(
     region_stocks: list[RegionStock],
     tenure_idx: int,
     rng: np.random.Generator,
+    tax_policy: TaxPolicyConfig | None = None,
 ) -> dict:
     """
     Run bank underwriting on buy intents.
@@ -32,6 +33,7 @@ def qualify_buyers(
     buy_intents : dict with keys hh_idx, target_region, target_quality, weight
     tenure_idx  : 1=brf, 2=smallhouse
     t_str       : current time string YYYY-MM for policy lookup
+    tax_policy  : optional property tax; monthly tax added to stressed payment
 
     Returns
     -------
@@ -50,6 +52,7 @@ def qualify_buyers(
     ltv_cap = credit_policy.ltv_cap_at(t_str)
     stress_rate = mortgage_rate + credit_policy.stress_rate_buffer
     max_dsti = credit_policy.max_dsti
+    tax_rate = tax_policy.tax_rate_at(t_str) if tax_policy else 0.0
 
     # Get property values for each intent
     property_values = np.array([
@@ -60,14 +63,18 @@ def qualify_buyers(
     # Required downpayment
     min_downpayment = property_values * (1 - ltv_cap)
 
-    # Stressed monthly payment (used for DSTI check)
-    stressed_payment = np.array([
+    # Monthly property tax (included in DSTI stress test)
+    monthly_tax = property_values * tax_rate / 12
+
+    # Stressed monthly payment (mortgage + property tax)
+    stressed_mortgage = np.array([
         _monthly_mortgage_payment(
             property_values[i], stress_rate, ltv=ltv_cap,
             amort_rate=credit_policy.amort_rate(ltv_cap)
         )
         for i in range(len(idx))
     ], dtype=np.float64)
+    stressed_payment = stressed_mortgage + monthly_tax
 
     income = hh.income_monthly[idx].astype(np.float64)
     wealth = hh.wealth_liquid[idx].astype(np.float64)
@@ -92,13 +99,16 @@ def qualify_buyers(
     actual_amort_rate = np.array([
         credit_policy.amort_rate(ltv) for ltv in actual_ltv
     ])
-    actual_payment = np.array([
+    actual_mortgage_payment = np.array([
         _monthly_mortgage_payment(
             property_values[q][i], mortgage_rate, ltv=actual_ltv[i],
             amort_rate=actual_amort_rate[i]
         )
         for i in range(q.sum())
     ], dtype=np.float32)
+
+    # Total payment includes actual mortgage + property tax
+    actual_payment = actual_mortgage_payment + (property_values[q] * tax_rate / 12).astype(np.float32)
 
     return {
         "hh_idx": idx[q],

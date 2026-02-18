@@ -38,9 +38,14 @@ class MetricsRecorder:
         macro_rate: float,
         shut_out_brf: float = 0.0,
         shut_out_small: float = 0.0,
+        property_tax_rate: float = 0.0,
     ) -> None:
 
-        row: dict[str, Any] = {"month": t_str, "mortgage_rate": macro_rate}
+        row: dict[str, Any] = {
+            "month": t_str,
+            "mortgage_rate": macro_rate,
+            "property_tax_rate": property_tax_rate,
+        }
 
         total_weighted = float(hh.weights.sum())
 

@@ -139,6 +139,7 @@ def run_scenario(
             region_stocks=region_stocks,
             tenure_idx=1,
             rng=rng,
+            tax_policy=cfg.tax_policy,
         )
 
         qualified_small = qualify_buyers(
@@ -150,6 +151,7 @@ def run_scenario(
             region_stocks=region_stocks,
             tenure_idx=2,
             rng=rng,
+            tax_policy=cfg.tax_policy,
         )
 
         # ------------------------------------------------------------------
@@ -183,7 +185,7 @@ def run_scenario(
         # ------------------------------------------------------------------
         # 6. Update mortgage balances for owners (amortization)
         # ------------------------------------------------------------------
-        _amortize_mortgages(hh, mortgage_rate, cfg.credit_policy)
+        _amortize_mortgages(hh, mortgage_rate, cfg.credit_policy, cfg.tax_policy, t_str)
 
         # ------------------------------------------------------------------
         # 7. Construction: decide starts → advance pipeline
@@ -205,6 +207,7 @@ def run_scenario(
             macro_rate=mortgage_rate,
             shut_out_brf=qualified_brf.get("shut_out_count", 0.0),
             shut_out_small=qualified_small.get("shut_out_count", 0.0),
+            property_tax_rate=cfg.tax_policy.tax_rate_at(t_str),
         )
 
         if verbose and (step % 12 == 0 or step == n_months - 1):
@@ -271,10 +274,12 @@ def _amortize_mortgages(
     hh: HouseholdArrays,
     mortgage_rate: float,
     credit_policy,
+    tax_policy=None,
+    t_str: str = "2000-01",
 ) -> None:
     """
     Update mortgage balances and housing costs for owners.
-    Monthly amortization + interest adjustment.
+    Monthly amortization + interest + property tax adjustment.
     """
     owner_mask = (hh.tenure > 0) & (hh.mortgage_balance > 0)
     if not owner_mask.any():
@@ -294,8 +299,12 @@ def _amortize_mortgages(
     new_mb = np.maximum(mb - monthly_amort, 0.0)
     hh.mortgage_balance[owner_mask] = new_mb.astype(np.float32)
 
-    # Update housing cost (interest + amortization + rough HOA fee for BRF)
+    # Property tax on home value
+    tax_rate = tax_policy.tax_rate_at(t_str) if tax_policy else 0.0
+    monthly_prop_tax = hv * tax_rate / 12
+
+    # Update housing cost (interest + amortization + HOA fee for BRF + property tax)
     hoa_fee = np.where(hh.tenure[owner_mask] == 1, 2_500.0, 0.0)  # BRF monthly fee
     hh.housing_cost[owner_mask] = (
-        monthly_interest + monthly_amort + hoa_fee
+        monthly_interest + monthly_amort + hoa_fee + monthly_prop_tax
     ).astype(np.float32)

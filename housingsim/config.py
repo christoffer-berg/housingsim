@@ -106,6 +106,29 @@ class CreditPolicyConfig(BaseModel):
         return rate
 
 
+class TaxPolicyConfig(BaseModel):
+    """
+    Property (real-estate) tax levied annually as a fraction of property value.
+
+    Sweden replaced progressive fastighetsskatt with a capped fastighetsavgift
+    in 2008. A new policy might re-introduce a rate-based tax.
+
+    property_tax_rate: annual fraction of market value (e.g. 0.01 = 1 %)
+    exemption_years:   new builds exempt for this many years after completion
+    """
+    property_tax_rate: list[TimedValue] = Field(
+        default_factory=lambda: [TimedValue(**{"from": "2000-01", "value": 0.0})]
+    )
+    brf_fee_annual: float = 30_000.0  # SEK/yr baseline HOA fee for BRF (replaces hard-coded)
+    exemption_years: int = 0
+
+    def tax_rate_at(self, t_str: str) -> float:
+        return resolve_value(self.property_tax_rate, t_str, 0.0)
+
+    def monthly_tax(self, property_value: float, t_str: str) -> float:
+        return property_value * self.tax_rate_at(t_str) / 12
+
+
 class ConstructionPolicyConfig(BaseModel):
     approval_delay_months: int = 10
     build_time_months: int = 18
@@ -155,6 +178,7 @@ class ScenarioConfig(BaseModel):
 
     macro: MacroConfig = Field(default_factory=MacroConfig)
     credit_policy: CreditPolicyConfig = Field(default_factory=CreditPolicyConfig)
+    tax_policy: TaxPolicyConfig = Field(default_factory=TaxPolicyConfig)
     construction_policy: ConstructionPolicyConfig = Field(
         default_factory=ConstructionPolicyConfig
     )
