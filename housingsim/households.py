@@ -86,11 +86,22 @@ class HouseholdArrays:
     move_propensity: np.ndarray   # float32 (N,) baseline monthly move prob
 
 
-def generate_households(n: int, rng: np.random.Generator) -> HouseholdArrays:
+def generate_households(
+    n: int,
+    rng: np.random.Generator,
+    population_shares: np.ndarray | None = None,
+    income_multipliers: dict | None = None,
+) -> HouseholdArrays:
     """Generate N synthetic households with calibrated Swedish-like distributions."""
 
-    # Regions: sample proportional to population shares
-    region = rng.choice(N_REGIONS, size=n, p=REGION_POP_SHARES).astype(np.int8)
+    # Regions: sample proportional to population shares (real or synthetic)
+    pop_shares = (
+        np.asarray(population_shares, dtype=float)
+        if population_shares is not None
+        else REGION_POP_SHARES
+    )
+    pop_shares = pop_shares / pop_shares.sum()   # normalise
+    region = rng.choice(N_REGIONS, size=n, p=pop_shares).astype(np.int8)
 
     # Age: uniform 22-80
     age_head = rng.uniform(22, 80, size=n).astype(np.float32)
@@ -99,10 +110,11 @@ def generate_households(n: int, rng: np.random.Generator) -> HouseholdArrays:
     hh_size = rng.choice([1, 2, 3, 4, 5], size=n,
                          p=[0.30, 0.35, 0.18, 0.12, 0.05]).astype(np.int8)
 
-    # Income: log-normal
+    # Income: log-normal, scaled by per-region multipliers (real or synthetic)
+    _default_mult = {"STHLM": 1.25, "GBG": 1.10, "MALMO": 1.00, "REST": 0.92}
+    _mults = income_multipliers if income_multipliers else _default_mult
+    region_income_mult = np.array([_mults.get(r, 1.0) for r in REGIONS])
     income_monthly = rng.lognormal(INCOME_LOG_MEAN, INCOME_LOG_STD, size=n).astype(np.float32)
-    # Scale income with region (STHLM highest)
-    region_income_mult = np.array([1.25, 1.10, 1.00, 0.92])
     income_monthly = income_monthly * region_income_mult[region]
 
     # Wealth: log-normal; owners have more wealth (assigned post-tenure)

@@ -25,24 +25,60 @@ from .bank import qualify_buyers
 from .markets import match_and_transact, allocate_rentals
 from .developers import ConstructionPipeline
 from .metrics import MetricsRecorder
+from .calibration import CalibrationData
 
 
 def run_scenario(
     cfg: ScenarioConfig,
     seed_override: int | None = None,
     verbose: bool = True,
+    calibration: CalibrationData | None = None,
 ) -> MetricsRecorder:
     """
     Run a single scenario with one random seed.
+
+    Parameters
+    ----------
+    calibration : CalibrationData, optional
+        When provided, uses real-world data (Riksbank/SCB) to initialise
+        prices, population shares, income multipliers, and the rate path.
+        Falls back to synthetic defaults where data is missing.
 
     Returns a MetricsRecorder containing all monthly KPIs.
     """
     seed = seed_override if seed_override is not None else cfg.random_seed
     rng = np.random.default_rng(seed)
 
-    # --- Initialise state ---
-    hh = generate_households(cfg.n_households, rng)
+    # --- Initialise state with real or synthetic data ---
+    pop_shares = calibration.population_shares if calibration else None
+    inc_mults = calibration.income_multipliers if calibration else None
+
+    hh = generate_households(
+        cfg.n_households, rng,
+        population_shares=pop_shares,
+        income_multipliers=inc_mults,
+    )
     region_stocks = build_initial_stocks()
+
+    if calibration is not None:
+        calibration.apply_to_stocks(region_stocks)
+
+        # Patch the rate path in credit-policy config if real data available
+        real_path = calibration.rate_path_for(cfg.time.start, cfg.time.end)
+        if real_path:
+            from .config import TimedValue
+            cfg = cfg.model_copy(deep=True)
+            cfg.macro.policy_rate_path = [
+                TimedValue(**{"from": d["from"], "value": d["value"]})
+                for d in real_path
+            ]
+
+        # Patch construction permits if real data available
+        real_permits = calibration.construction_permits
+        if real_permits:
+            cfg = cfg.model_copy(deep=True)
+            cfg.construction_policy.base_permits.update(real_permits)
+
     pipeline = ConstructionPipeline()
     recorder = MetricsRecorder()
 
@@ -187,6 +223,7 @@ def run_batch(
     cfg: ScenarioConfig,
     output_dir: str = "runs",
     verbose: bool = True,
+    calibration: CalibrationData | None = None,
 ) -> list[MetricsRecorder]:
     """
     Run cfg.n_runs independent seeds; save parquet + metadata.
@@ -207,7 +244,9 @@ def run_batch(
     for run_idx, seed in enumerate(seeds):
         if verbose:
             print(f"\nRun {run_idx + 1}/{cfg.n_runs} (seed={seed})")
-        recorder = run_scenario(cfg, seed_override=seed, verbose=verbose)
+        recorder = run_scenario(
+            cfg, seed_override=seed, verbose=verbose, calibration=calibration
+        )
         fname = out_path / f"run_{run_idx:03d}.parquet"
         recorder.save_parquet(str(fname))
         recorders.append(recorder)

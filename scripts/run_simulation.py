@@ -5,9 +5,15 @@ Usage:
   python scripts/run_simulation.py scenarios/baseline.yaml
   python scripts/run_simulation.py scenarios/baseline.yaml --runs 5 --output runs/
   python scripts/run_simulation.py scenarios/baseline.yaml scenarios/ltv_90_from_2026_04.yaml
+  python scripts/run_simulation.py scenarios/baseline.yaml --real-data
+  python scripts/run_simulation.py scenarios/baseline.yaml --real-data --fetch
 
 Run all scenarios in a directory:
   python scripts/run_simulation.py scenarios/ --all
+
+To use real Swedish data:
+  1. python scripts/fetch_data.py          # download & cache
+  2. python scripts/run_simulation.py scenarios/baseline.yaml --real-data
 """
 
 from __future__ import annotations
@@ -54,6 +60,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run all .yaml files found in specified paths",
     )
+    parser.add_argument(
+        "--real-data",
+        dest="real_data",
+        action="store_true",
+        help=(
+            "Calibrate from real SCB/Riksbank data cached in data/. "
+            "Run scripts/fetch_data.py first to populate the cache."
+        ),
+    )
+    parser.add_argument(
+        "--fetch",
+        action="store_true",
+        help="Fetch/refresh data from APIs before running (implies --real-data)",
+    )
+    parser.add_argument(
+        "--ref-year",
+        dest="ref_year",
+        type=int,
+        default=None,
+        help="Reference year for calibration (default: latest available in data)",
+    )
     return parser.parse_args()
 
 
@@ -77,6 +104,7 @@ def main() -> None:
 
     from housingsim.config import ScenarioConfig
     from housingsim.simulation import run_batch
+    from housingsim.calibration import CalibrationData
 
     args = parse_args()
     yaml_paths = collect_yaml_paths(args.scenarios, args.run_all)
@@ -85,7 +113,25 @@ def main() -> None:
         print("No scenario files found.")
         sys.exit(1)
 
-    print(f"Found {len(yaml_paths)} scenario(s):")
+    # --- Optional: fetch real data first ---
+    if args.fetch:
+        print("Fetching real data before running …")
+        from housingsim.data_fetch import fetch_all
+        fetch_all(force=True)
+        args.real_data = True
+
+    # --- Load calibration data if requested ---
+    calibration = None
+    if args.real_data:
+        print("\nLoading calibration data from data/ cache …")
+        calibration = CalibrationData.load(reference_year=args.ref_year)
+        if calibration.is_real_data:
+            print("  Real-world data loaded successfully.")
+        else:
+            print("  No cached data found — run scripts/fetch_data.py first.")
+            print("  Continuing with synthetic defaults.\n")
+
+    print(f"\nFound {len(yaml_paths)} scenario(s):")
     for p in yaml_paths:
         print(f"  - {p}")
 
@@ -103,6 +149,7 @@ def main() -> None:
             cfg,
             output_dir=args.output,
             verbose=not args.quiet,
+            calibration=calibration,
         )
         print(f"Completed: {cfg.scenario_name} ({len(recorders)} run(s))")
         df = recorders[0].to_dataframe()
