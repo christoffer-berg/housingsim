@@ -1,0 +1,48 @@
+scenario_name: "fast_construction_sthlm"
+
+time:
+  start: "2024-01"
+  end: "2030-12"
+
+n_households: 10000
+random_seed: 42
+n_runs: 3
+
+macro:
+  base_policy_rate: 0.0225
+  mortgage_spread: 0.015
+  income_growth_annual: 0.025
+  migration_growth_annual: 0.005
+  policy_rate_path:
+    - {from: "2024-01", value: 0.0225}
+    - {from: "2025-01", value: 0.0175}
+    - {from: "2026-01", value: 0.0150}
+    - {from: "2027-01", value: 0.0175}
+
+credit_policy:
+  ltv_cap:
+    - {from: "2024-01", value: 0.85}
+  max_dsti: 0.40
+  stress_rate_buffer: 0.03
+  amort_above_50_ltv: 0.02
+  amort_above_70_ltv: 0.01
+
+construction_policy:
+  approval_delay_months: 5       # faster permitting vs baseline 10
+  build_time_months: 18
+  base_permits:
+    STHLM: 400
+    GBG: 200
+    MALMO: 150
+    REST: 300
+  permits_multiplier:
+    - {from: "2026-01", region: "STHLM", value: 1.40}
+    - {from: "2026-01", region: "GBG",   value: 1.20}
+  tenure_split:
+    rent_regulated: 0.35
+    buy_bostadsratt: 0.50
+    buy_smallhouse: 0.15
+  supply_elasticity: 0.20
+
+price_update_kappa: 0.10
+price_noise_std: 0.005
